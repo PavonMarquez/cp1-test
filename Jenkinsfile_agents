@@ -1,0 +1,160 @@
+pipeline {
+    agent none 
+    
+    stages {
+        stage('Get code') {
+            agent { label 'agente-1 (server)' }
+            
+            steps {
+                sh '''
+                    whoami
+                    hostname
+                    echo $WORKSPACE
+                '''
+                echo 'Clonando repositorio dentro de agente-1'
+                git 'https://github.com/PavonMarquez/cp1-helloworld.git'
+                
+                echo 'Mostrandooslos archivos clonados'
+                sh 'ls -la'
+                
+                echo 'Guardando en stash para otros agentes'
+                stash includes: '**', name: 'codigo-fuente'   
+            }
+        }
+        
+        stage('Build') {
+            agent { label 'agente-1 (server)' }
+            
+            steps {
+
+                sh '''
+                    whoami
+                    hostname
+                    echo $WORKSPACE
+                '''
+                echo 'Preparando entorno de Build en agente-1'
+                unstash 'codigo-fuente'
+                echo 'Build completado (no se compila por ser Python)'
+            }
+            post {
+                always {
+                    cleanWs()
+                }
+            }
+        }
+        
+        stage('Test') {
+            parallel {
+                stage('Unit') {
+                    agent { label 'agente-2 (server)' }
+                    steps {
+                        sh '''
+                            whoami
+                            hostname
+                            echo ${WORKSPACE}
+                        '''
+                        echo '### Ejecutando Unit en agente-2 ###'
+                        unstash 'codigo-fuente'
+
+                        sh '''
+                            set -e
+                            
+                            # Crea un entorno virtual de python si no existe
+                            if [ ! -d "venv" ]; then
+                                python3 -m venv venv
+                                . venv/bin/activate
+                                pip install pytest
+                            else
+                                . venv/bin/activate
+                            fi
+                            export PYTHONPATH=$WORKSPACE
+                            pytest --junitxml=result-unit.xml test/unit
+                        '''
+                        
+                        stash includes: 'result-unit.xml', name: 'unit-results'
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+
+                stage('Rest') {
+                    agent { label 'agente-3 (server)' }
+                    steps {
+                        sh '''
+                            whoami
+                            hostname
+                            echo ${WORKSPACE}
+                        '''
+                        echo '### Ejecutando Rest en agente-3 ###'
+                        unstash 'codigo-fuente'
+
+                        sh '''
+                            set -e
+
+                            # Crea un entorno virtual de python si no existe
+                            if [ ! -d "venv" ]; then
+                                python3 -m venv venv
+                                . venv/bin/activate
+                                pip install pytest flask
+                            else
+                                . venv/bin/activate
+                            fi
+                        
+                            export PYTHONPATH=$WORKSPACE
+                            export FLASK_APP=app/api.py
+                            export FLASK_ENV=development
+                        
+                            # Lanzamos Flask en segundo plano y guardamos su PID
+                            flask run --port=5000 &
+                            FLASK_PID=$!
+                        
+                            # Lanzar Wiremock en en segundo plano y guardamos su PID
+                            java -jar /home/jarvis/unir/agents/agente-3/wiremock/wiremock-jre8-standalone-2.28.0.jar --port 9090 --root-dir /home/jarvis/unir/agents/agente-3/wiremock &
+                            WIREMOCK_PID=$!
+                        
+                            # Si algo fallase, paramos Flask y Wiremock
+                            trap "echo 'Matando procesos...'; kill $FLASK_PID $WIREMOCK_PID" EXIT
+                        
+                            sleep 1
+                        
+                            pytest --junitxml=result-rest.xml test/rest
+                        '''
+                    
+                        stash includes: 'result-rest.xml', name: 'rest-results'
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+            }
+        } 
+        
+        stage('Results') {
+            agent { label 'agente-1 (server)' } 
+            steps {
+                sh '''
+                    whoami
+                    hostname
+                    echo ${WORKSPACE}
+                '''
+                echo 'Resultados'
+                
+                unstash 'unit-results'
+                unstash 'rest-results'
+                
+                junit 'result*.xml'
+            }
+            
+            post {
+                always {
+                    cleanWs()
+                }
+            }
+        } 
+    }
+}
