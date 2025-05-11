@@ -12,7 +12,7 @@ pipeline {
                     echo $WORKSPACE
                 '''
                 echo 'Clonando repositorio dentro de agente-1'
-                git 'https://github.com/PavonMarquez/cp1-helloworld.git'
+                git branch: 'develop', url: 'https://github.com/PavonMarquez/cp1-helloworld.git'
                 
                 echo 'Mostrandooslos archivos clonados'
                 sh 'ls -la'
