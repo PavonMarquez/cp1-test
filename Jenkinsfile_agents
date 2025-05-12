@@ -118,7 +118,11 @@ pipeline {
                             # Si algo fallase, paramos Flask y Wiremock
                             trap "echo 'Matando procesos...'; kill $FLASK_PID $WIREMOCK_PID" EXIT
                         
-                            sleep 1
+                            # Esperamos a que Wiremock esté listo antes de lanzar los tests
+                            until curl --silent --fail http://localhost:9090/__admin > /dev/null; do
+                                echo "Esperando a que Wiremock esté listo..."
+                                sleep 1
+                            done
                         
                             pytest --junitxml=result-rest.xml test/rest
                         '''
